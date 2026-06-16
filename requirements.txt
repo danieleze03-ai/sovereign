@@ -1,4 +1,4 @@
-websockets==16.0
+websockets>=11,<15
 numpy
 pandas
 python-dotenv==1.0.1
