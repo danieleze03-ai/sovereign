@@ -1,6 +1,7 @@
-Set-Content requirements.txt "websockets==16.0
+websockets==16.0
 numpy
 pandas
 python-dotenv==1.0.1
 supabase==2.15.1
-python-telegram-bot==21.10"
+httpx==0.28.1
+flask

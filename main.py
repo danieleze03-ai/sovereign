@@ -18,6 +18,7 @@ from risk.circuit_breaker import CircuitBreaker
 from broker.trade_executor import TradeExecutor
 from reporting.telegram_alerts import TelegramAlerts
 from reporting.supabase_logger import SupabaseLogger
+from keep_alive import keep_alive
 from config import PAIRS
 
 # ── Global components ──────────────────────────────────────────────────────────
@@ -158,7 +159,6 @@ async def on_tick(pair, tick_data):
             phantom.register_trade()
             drift_rider.confirm_entry(pair)
 
-            # ✅ Use real entry price from Deriv response for SL/TP
             entry     = trade.get("buy_price", price)
             direction = dr_eval["direction"]
             if direction == "BUY":
@@ -195,7 +195,6 @@ async def on_tick(pair, tick_data):
                 spike_logger.get_ticks_since_spike(pair)
             )
 
-            # ✅ Use real entry price from Deriv response for SL/TP
             entry     = trade.get("buy_price", price)
             direction = sc_eval["direction"]
             if direction == "BUY":
@@ -248,6 +247,7 @@ async def main():
     global spike_catcher, drift_rider
 
     print("\n[SOVEREIGN] 🏛️  Initializing...")
+    keep_alive()  # ← Flask keepalive for Render
 
     # 1. Test Supabase connection
     print("[SOVEREIGN] Testing Supabase connection...")
