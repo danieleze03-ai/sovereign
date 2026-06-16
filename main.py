@@ -102,12 +102,12 @@ async def on_tick(pair, tick_data):
             "ticks_since_last": spike.get("ticks_since_last", 0)
         })
 
-        await telegram.spike_alert(
-            pair,
-            spike.get("direction"),
-            spike.get("move_size", 0),
-            spike.get("ticks_since_last", 0)
-        )
+        # await telegram.spike_alert(
+        #     pair,
+        #     spike.get("direction"),
+        #     spike.get("move_size", 0),
+        #     spike.get("ticks_since_last", 0)
+        # )
 
     # If pair already has open trade — check if it closed
     if executor.has_open_trade(pair):
