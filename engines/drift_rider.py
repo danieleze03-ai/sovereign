@@ -15,7 +15,7 @@ class DriftRider:
         self.last_spike_tick = {pair: -999 for pair in PAIRS}
 
         # Max ticks after spike to enter drift
-        self.drift_window = 15
+        self.drift_window = 50
 
     def evaluate(self, pair: str):
         """
