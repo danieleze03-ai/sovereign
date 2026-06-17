@@ -4,64 +4,98 @@ from config import PAIR_SYMBOLS
 class TradeExecutor:
     def __init__(self, connection):
         self.connection    = connection
-        self.open_trades   = {}  # pair → trade details
-        self.trade_history = []  # all closed trades
+        self.open_trades   = {}
+        self.trade_history = []
 
     def _get_contract_type(self, pair: str, direction: str):
         """
-        Boom/Crash synthetic indices use CALLE/PUTE not RISE/FALL.
-        CALLE = price goes UP
-        PUTE  = price goes DOWN
+        Boom/Crash use UPORDOWN contract category.
+        BOOM  → price rises  → CALL
+        CRASH → price falls  → PUT
+        But must go through proposal first to get valid contract.
         """
         if direction == "BUY":
-            return "CALLE"
+            return "CALL"
         elif direction == "SELL":
-            return "PUTE"
+            return "PUT"
         return None
+
+    async def _get_proposal(self, pair: str, direction: str, stake: float):
+        """
+        Step 1 — Get a price proposal from Deriv.
+        Returns proposal_id or None if failed.
+        """
+        symbol        = PAIR_SYMBOLS[pair]
+        contract_type = self._get_contract_type(pair, direction)
+
+        request = {
+            "proposal": 1,
+            "amount":   stake,
+            "basis":    "stake",
+            "contract_type": contract_type,
+            "currency": "USD",
+            "duration": 5,
+            "duration_unit": "t",
+            "symbol": symbol
+        }
+
+        await self.connection.send(request)
+
+        for _ in range(10):
+            response = await self.connection.receive()
+
+            if response is None:
+                print("[EXECUTOR] No response from API during proposal")
+                return None, None
+
+            if "proposal" in response:
+                proposal_id  = response["proposal"].get("id")
+                ask_price    = response["proposal"].get("ask_price")
+                print(f"[EXECUTOR] Proposal received: {proposal_id} | Ask: {ask_price}")
+                return proposal_id, ask_price
+
+            elif "error" in response:
+                error_msg = response["error"]["message"]
+                error_code = response["error"].get("code", "")
+                print(f"[EXECUTOR] Proposal failed [{error_code}]: {error_msg}")
+                return None, None
+
+        print("[EXECUTOR] Timeout waiting for proposal")
+        return None, None
 
     async def open_trade(self, pair: str, direction: str,
                          stake: float, engine: str):
         """
         Open a trade on Deriv.
-        Uses 5-tick duration (matches our 5-minute timeframe logic).
-        Returns trade result dict or None if failed.
+        Step 1: Get proposal
+        Step 2: Buy using proposal ID
         """
-        symbol        = PAIR_SYMBOLS[pair]
-        contract_type = self._get_contract_type(pair, direction)
-
-        if not contract_type:
-            print(f"[EXECUTOR] Invalid direction: {direction}")
-            return None
-
-        # Build buy request
-        request = {
-            "buy": 1,
-            "price": stake,
-            "parameters": {
-                "contract_type": contract_type,
-                "symbol":        symbol,
-                "duration":      5,
-                "duration_unit": "t",  # ticks
-                "basis":         "stake",
-                "amount":        stake,
-                "currency":      "USD"
-            }
-        }
-
         print(f"\n[EXECUTOR] Opening trade...")
         print(f"  Pair      : {pair}")
-        print(f"  Direction : {direction} ({contract_type})")
+        print(f"  Direction : {direction}")
         print(f"  Stake     : ${stake}")
         print(f"  Engine    : {engine}")
 
-        await self.connection.send(request)
+        # Step 1 — Get proposal
+        proposal_id, ask_price = await self._get_proposal(pair, direction, stake)
 
-        # Wait for buy confirmation
+        if not proposal_id:
+            print(f"  ❌ Could not get proposal for {pair}")
+            return None
+
+        # Step 2 — Buy using proposal ID
+        buy_request = {
+            "buy":   proposal_id,
+            "price": ask_price or stake
+        }
+
+        await self.connection.send(buy_request)
+
         for _ in range(10):
             response = await self.connection.receive()
 
             if response is None:
-                print("[EXECUTOR] No response from API")
+                print("[EXECUTOR] No response from API during buy")
                 return None
 
             if "buy" in response:
@@ -74,7 +108,7 @@ class TradeExecutor:
                     "contract_id":   contract_id,
                     "pair":          pair,
                     "direction":     direction,
-                    "contract_type": contract_type,
+                    "contract_type": self._get_contract_type(pair, direction),
                     "stake":         stake,
                     "buy_price":     buy_price,
                     "engine":        engine,
@@ -97,14 +131,10 @@ class TradeExecutor:
                 print(f"  ❌ Trade failed: {error_msg}")
                 return None
 
-        print("[EXECUTOR] Timeout waiting for trade confirmation")
+        print("[EXECUTOR] Timeout waiting for buy confirmation")
         return None
 
     async def check_trade(self, pair: str):
-        """
-        Check status of an open trade.
-        Returns updated trade dict or None.
-        """
         if pair not in self.open_trades:
             return None
 
@@ -147,10 +177,6 @@ class TradeExecutor:
         return None
 
     async def close_trade_early(self, pair: str):
-        """
-        Sell/close a contract before expiry.
-        Used by exit logic when drift exhausts.
-        """
         if pair not in self.open_trades:
             return None
 
@@ -158,8 +184,8 @@ class TradeExecutor:
         contract_id = trade["contract_id"]
 
         request = {
-            "sell": contract_id,
-            "price": 0  # sell at market price
+            "sell":  contract_id,
+            "price": 0
         }
 
         await self.connection.send(request)
@@ -170,8 +196,7 @@ class TradeExecutor:
             if response and "sell" in response:
                 sell_data = response["sell"]
                 sold_for  = sell_data.get("sold_for")
-                pnl       = sold_for - trade["stake"] \
-                            if sold_for else None
+                pnl       = sold_for - trade["stake"] if sold_for else None
 
                 trade["result"]     = "WIN" if (pnl and pnl > 0) else "LOSS"
                 trade["pnl"]        = pnl
@@ -189,26 +214,21 @@ class TradeExecutor:
                 return trade
 
             elif response and "error" in response:
-                print(f"[EXECUTOR] Close error: "
-                      f"{response['error']['message']}")
+                print(f"[EXECUTOR] Close error: {response['error']['message']}")
                 return None
 
         return None
 
     def get_open_trade(self, pair: str):
-        """Return open trade for a pair if exists"""
         return self.open_trades.get(pair)
 
     def has_open_trade(self, pair: str):
-        """Check if pair has an open trade"""
         return pair in self.open_trades
 
     def get_trade_history(self):
-        """Return all closed trades"""
         return self.trade_history
 
     def get_daily_pnl(self):
-        """Calculate total P&L from closed trades today"""
         total = sum(
             t["pnl"] for t in self.trade_history
             if t["pnl"] is not None
@@ -216,7 +236,6 @@ class TradeExecutor:
         return round(total, 2)
 
     def get_win_rate(self):
-        """Calculate win rate from trade history"""
         if not self.trade_history:
             return 0.0
         wins = sum(
