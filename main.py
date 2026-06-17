@@ -92,6 +92,7 @@ async def on_tick(pair, tick_data):
     # Spike detected — notify drift rider and log
     if spike:
         drift_rider.reset_after_spike(pair)
+        spike_catcher.reset_cooldown(pair)
 
         db.log_spike({
             "pair":             pair,

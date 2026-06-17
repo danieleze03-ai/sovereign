@@ -17,9 +17,11 @@ class SpikeCatcher:
         self.ema            = ema
         self.tick_zone      = tick_zone
 
-        # Track last entry per pair to prevent re-entry
-        self.last_entry_tick = {pair: -999 for pair in PAIRS}
-        self.cooldown_ticks  = 30  # ticks between entries
+        # Cooldown — use a simple boolean flag per pair
+        # Resets automatically when a new spike is detected
+        self.in_cooldown     = {pair: False for pair in PAIRS}
+        self.cooldown_ticks  = 30
+        self.cooldown_counter = {pair: 0 for pair in PAIRS}
 
     def evaluate(self, pair: str):
         """
@@ -27,6 +29,14 @@ class SpikeCatcher:
         Returns dict with score, signals, and entry decision.
         """
         ticks = self.spike_logger.get_ticks_since_spike(pair)
+
+        # Tick down cooldown counter
+        if self.in_cooldown[pair]:
+            self.cooldown_counter[pair] += 1
+            if self.cooldown_counter[pair] >= self.cooldown_ticks:
+                self.in_cooldown[pair]      = False
+                self.cooldown_counter[pair] = 0
+                print(f"[SPIKE CATCHER] Cooldown cleared for {pair}")
 
         # Get all signal statuses
         vel_status    = self.velocity.get_status(pair)
@@ -55,33 +65,34 @@ class SpikeCatcher:
         # Entry requires 4/5 signals
         entry_valid = score >= 4
 
-        # Check cooldown — don't re-enter too soon
-        current_tick = self.spike_logger.get_ticks_since_spike(pair)
-        last_entry   = self.last_entry_tick[pair]
-        in_cooldown  = (current_tick - last_entry) < self.cooldown_ticks
-
-        should_enter = entry_valid and not in_cooldown
+        should_enter = entry_valid and not self.in_cooldown[pair]
 
         return {
-            "pair":        pair,
-            "score":       score,
-            "signals":     signals,
-            "direction":   direction,
-            "entry_valid": entry_valid,
-            "in_cooldown": in_cooldown,
-            "should_enter": should_enter,
+            "pair":          pair,
+            "score":         score,
+            "signals":       signals,
+            "direction":     direction,
+            "entry_valid":   entry_valid,
+            "in_cooldown":   self.in_cooldown[pair],
+            "should_enter":  should_enter,
             "ticks_since_spike": ticks,
-            "rsi_value":   rsi_status["rsi"],
-            "ema_trend":   ema_status["trend"],
-            "compression": vel_status["compression_ratio"],
-            "zone_pct":    zone_status["progress_pct"]
+            "rsi_value":     rsi_status["rsi"],
+            "ema_trend":     ema_status["trend"],
+            "compression":   vel_status["compression_ratio"],
+            "zone_pct":      zone_status["progress_pct"]
         }
 
-    def confirm_entry(self, pair: str, current_tick: int):
-        """Call this when a trade is actually opened"""
-        self.last_entry_tick[pair] = current_tick
-        print(f"[SPIKE CATCHER] Entry confirmed on {pair} "
-              f"at tick {current_tick}")
+    def confirm_entry(self, pair: str, current_tick: int = 0):
+        """Call this when a trade is attempted — starts cooldown"""
+        self.in_cooldown[pair]      = True
+        self.cooldown_counter[pair] = 0
+        print(f"[SPIKE CATCHER] Cooldown started for {pair}")
+
+    def reset_cooldown(self, pair: str):
+        """Call this when a new spike is detected — clears cooldown"""
+        self.in_cooldown[pair]      = False
+        self.cooldown_counter[pair] = 0
+        print(f"[SPIKE CATCHER] Cooldown reset for {pair} — new spike")
 
     def get_best_pair(self):
         """
