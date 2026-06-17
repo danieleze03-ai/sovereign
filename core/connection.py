@@ -5,11 +5,11 @@ from config import DERIV_WS_URL, DERIV_API_TOKEN
 
 class DerivConnection:
     def __init__(self):
-        self.websocket = None
-        self.connected = False
+        self.websocket         = None
+        self.connected         = False
         self.reconnect_attempts = 0
-        self.max_reconnects = 999
-        self.reconnect_delay = 5
+        self.max_reconnects    = 999
+        self.reconnect_delay   = 5
 
     async def connect(self):
         """Establish WebSocket connection to Deriv API"""
@@ -18,10 +18,11 @@ class DerivConnection:
                 print(f"[SOVEREIGN] Connecting to Deriv API...")
                 self.websocket = await websockets.connect(
                     DERIV_WS_URL,
-                    ping_interval=None,
-                    ping_timeout=None
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=10
                 )
-                self.connected = True
+                self.connected         = True
                 self.reconnect_attempts = 0
                 print(f"[SOVEREIGN] Connected successfully.")
                 await self.authorize()
@@ -78,15 +79,24 @@ class DerivConnection:
 
     async def keep_alive(self):
         """
-        Send Deriv-level ping every 25 seconds.
-        Keeps connection alive without relying on websockets built-in ping.
+        Send Deriv-level ping every 20 seconds.
+        If connection drops, attempt full reconnect.
         """
-        while self.connected:
-            try:
-                await self.send({"ping": 1})
-                await asyncio.sleep(25)
-            except Exception:
-                break
+        while True:
+            if self.connected:
+                try:
+                    await self.send({"ping": 1})
+                    resp = await self.receive()
+                    if resp and "ping" in resp:
+                        pass  # silent — connection healthy
+                except Exception as e:
+                    print(f"[SOVEREIGN] Keep-alive error: {e}")
+                    self.connected = False
+            else:
+                print(f"[SOVEREIGN] Connection lost — reconnecting...")
+                await self.connect()
+
+            await asyncio.sleep(20)
 
     async def disconnect(self):
         """Clean disconnect"""
