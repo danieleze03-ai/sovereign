@@ -155,9 +155,10 @@ async def on_tick(pair, tick_data):
             stake,
             "DRIFT_RIDER"
         )
+        # Always confirm entry to prevent retry loop
+        drift_rider.confirm_entry(pair)
         if trade:
             phantom.register_trade()
-            drift_rider.confirm_entry(pair)
 
             entry     = trade.get("buy_price", price)
             direction = dr_eval["direction"]
@@ -188,12 +189,13 @@ async def on_tick(pair, tick_data):
             stake,
             "SPIKE_CATCHER"
         )
+        # Always confirm entry to prevent retry loop
+        spike_catcher.confirm_entry(
+            pair,
+            spike_logger.get_ticks_since_spike(pair)
+        )
         if trade:
             phantom.register_trade()
-            spike_catcher.confirm_entry(
-                pair,
-                spike_logger.get_ticks_since_spike(pair)
-            )
 
             entry     = trade.get("buy_price", price)
             direction = sc_eval["direction"]

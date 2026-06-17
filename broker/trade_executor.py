@@ -9,14 +9,14 @@ class TradeExecutor:
 
     def _get_contract_type(self, pair: str, direction: str):
         """
-        Boom/Crash synthetic indices use RISE/FALL for tick contracts.
-        RISE = price goes UP
-        FALL = price goes DOWN
+        Boom/Crash synthetic indices use CALLE/PUTE not RISE/FALL.
+        CALLE = price goes UP
+        PUTE  = price goes DOWN
         """
         if direction == "BUY":
-            return "RISE"
+            return "CALLE"
         elif direction == "SELL":
-            return "FALL"
+            return "PUTE"
         return None
 
     async def open_trade(self, pair: str, direction: str,
